@@ -1,0 +1,7 @@
+{
+  "module": "alu",
+  "ports": {
+    "inputs": ["clk", "rst", "a", "b"],
+    "outputs": ["result", "carry_out", "zero_flag"]
+  }
+}
