@@ -1,0 +1,26 @@
+{
+  "module": "dual_clock_fifo",
+  "path": "../test_files/verilog",
+  "clocks": {
+    "wr_clk": 10,
+    "rd_clk": 25
+  },
+  "parameters": {
+    "DATA_WIDTH": 32,
+    "DEPTH": 16
+  },
+  "ports": {
+    "inputs": [
+      "wr_rst_n",
+      "wr_en",
+      { "name": "wr_data", "width": "DATA_WIDTH" },
+      "rd_rst_n",
+      "rd_en"
+    ],
+    "outputs": [
+      { "name": "rd_data", "width": "DATA_WIDTH", "type": "reg" },
+      "full",
+      "empty"
+    ]
+  }
+}

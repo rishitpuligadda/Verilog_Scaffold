@@ -1,0 +1,22 @@
+{
+  "module": "alu",
+  "path": "../test_files/verilog",
+  "parameters": {
+    "DATA_WIDTH": 32,
+    "OP_WIDTH": 4
+  },
+  "ports": {
+    "inputs": [
+      "clk",
+      "rst_n",
+      { "name": "opcode",    "width": "OP_WIDTH" },
+      { "name": "operand_a", "width": "DATA_WIDTH" },
+      { "name": "operand_b", "width": "DATA_WIDTH" }
+    ],
+    "outputs": [
+      { "name": "result",    "width": "DATA_WIDTH", "type": "reg" },
+      { "name": "carry_out", "type": "reg" },
+      "zero_flag"
+    ]
+  }
+}

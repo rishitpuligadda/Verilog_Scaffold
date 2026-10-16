@@ -1,0 +1,13 @@
+{
+  "module": "counter",
+  "path": "../verilog",
+  "ports": {
+    "inputs": [
+      "clk",
+      "rst_n"
+    ],
+    "outputs": [
+      { "name": "count",    "width": "4", "type": "reg" }
+    ]
+  }
+}
