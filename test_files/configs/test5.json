@@ -1,0 +1,13 @@
+{
+  "module": "andg",
+  "path": "../verilog",
+  "ports": {
+    "inputs": [
+      "a",
+      "b"
+    ],
+    "outputs": [
+      "y"
+    ]
+  }
+}
