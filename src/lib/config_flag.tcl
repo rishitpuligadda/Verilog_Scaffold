@@ -3,10 +3,10 @@
 # Config keys:
 #   module      (required) module name
 #   path        output directory, or a full .v/.sv file path. A relative path
-#               is resolved against the src/ directory (where
-#               generate_verilog.tcl lives), NOT the current directory, so the
-#               output lands in the same place wherever you run the script from.
-#               Without "path", files go to the current directory.
+#               is resolved against the directory containing the CONFIG FILE,
+#               so the output lands in the same place no matter where you run
+#               the script from. Without "path", files go to the current
+#               directory.
 #   parameters  { "NAME": value, ... }
 #   clocks      { "clk_name": period_ns, ... }   (legacy: "clk_period": N)
 #   ports       { "inputs": [...], "outputs": [...] }
@@ -115,8 +115,10 @@ proc config_flag {config_file {force 0}} {
     if {[dict exists $data path]} {
         set target [string trim [dict get $data path]]
     }
-    if {$target ne "" && [file pathtype $target] eq "relative" && [info exists ::script_dir]} {
-        set target [file join $::script_dir $target]
+    # Relative paths are relative to the config file's own directory
+    if {$target ne "" && [file pathtype $target] eq "relative"} {
+        set config_dir [file dirname [file normalize $config_file]]
+        set target [file join $config_dir $target]
     }
     if {$target eq ""} {
         set out_file "${mod_name}.v"
