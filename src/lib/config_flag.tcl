@@ -9,12 +9,10 @@ proc normalize_ports {port_list} {
             set width ""
             set ptype ""
 
-            # Check for data type (e.g. "reg", "wire", "logic")
             if {[dict exists $item type]} {
                 set ptype [string trim [dict get $item type]]
             }
 
-            # Check for width
             if {[dict exists $item width]} {
                 set raw_w [string trim [dict get $item width]]
                 set raw_w [string trim $raw_w {[] }]
@@ -33,7 +31,6 @@ proc normalize_ports {port_list} {
 
             lappend normalized [list $ptype $width $name]
         } else {
-            # Single scalar (e.g. "clk" or "zero_flag") -> no type, no width
             lappend normalized [list "" "" $item]
         }
     }
@@ -58,7 +55,7 @@ proc config_flag {config_file} {
 
     set data [json::json2dict $content]
 
-    # 1. Clean module name (always strip any accidental path or extension)
+    # 1. Clean module name
     set raw_mod [dict get $data module]
     set mod_name [file rootname [file tail $raw_mod]]
 
@@ -69,28 +66,48 @@ proc config_flag {config_file} {
     }
 
     if {$target_path eq ""} {
-        # Default: current working directory
         set out_file "${mod_name}.v"
     } elseif {[file extension $target_path] eq ".v"} {
-        # User specified full filepath with .v
         set out_file $target_path
     } else {
-        # User specified a directory
         set out_file [file join $target_path "${mod_name}.v"]
     }
 
-    # 3. Create destination directory if it doesn't exist
+    # 3. Create destination directory if needed
     set out_dir [file dirname $out_file]
     if {$out_dir ne "" && ![file exists $out_dir]} {
         file mkdir $out_dir
     }
 
-    # 4. Extract parameters & ports
+    # 4. Extract parameters
     set params {}
     if {[dict exists $data parameters]} {
         set params [dict get $data parameters]
     }
 
+    # 5. Extract testbench generation flag (default: true / 1)
+    set generate_tb 1
+    if {[dict exists $data generate_tb]} {
+        set raw_tb [dict get $data generate_tb]
+        if {[string is boolean -strict $raw_tb]} {
+            set generate_tb [string is true -strict $raw_tb]
+        }
+    } elseif {[dict exists $data tb]} {
+        set raw_tb [dict get $data tb]
+        if {[string is boolean -strict $raw_tb]} {
+            set generate_tb [string is true -strict $raw_tb]
+        }
+    }
+
+    # 6. Extract clock definitions
+    set clocks [dict create]
+    if {[dict exists $data clocks]} {
+        set clocks [dict get $data clocks]
+    } elseif {[dict exists $data clk_period]} {
+        set clocks [dict create clk [dict get $data clk_period]]
+    }
+
+    # 7. Extract ports
     set raw_inputs  {}
     set raw_outputs {}
     if {[dict exists $data ports]} {
@@ -102,10 +119,44 @@ proc config_flag {config_file} {
     set inputs  [normalize_ports $raw_inputs]
     set outputs [normalize_ports $raw_outputs]
 
-    # 5. Write the Verilog design file
+    # 8. Deduplicate & inject clocks into inputs
+    set existing_in_names {}
+    foreach in $inputs {
+        lappend existing_in_names [lindex $in 2]
+    }
+
+    set clock_port_list {}
+    dict for {clk_name _} $clocks {
+        if {$clk_name ni $existing_in_names} {
+            lappend clock_port_list [list "" "" $clk_name]
+        }
+    }
+    set inputs [concat $clock_port_list $inputs]
+
+    # Fallback: if no clocks dictionary specified, search inputs for *clk*
+    if {[dict size $clocks] == 0} {
+        foreach in $inputs {
+            set signame [lindex $in 2]
+            if {[string match "*clk*" $signame]} {
+                dict set clocks $signame 10
+            }
+        }
+    }
+
+    # 9. Write Verilog design file
     set fp [open $out_file w]
     design_template $mod_name $fp $inputs $outputs $params
     close $fp
+    puts "Generated design:    $out_file"
 
-    puts "Generated design: $out_file"
+    # 10. Conditionally write testbench file
+    if {$generate_tb} {
+        set tb_file [file join $out_dir "tb_${mod_name}.v"]
+        set tb_fp [open $tb_file w]
+        tb_template $mod_name $tb_fp $inputs $outputs $params $clocks
+        close $tb_fp
+        puts "Generated testbench: $tb_file"
+    } else {
+        puts "Skipped testbench:   disabled by config"
+    }
 }
