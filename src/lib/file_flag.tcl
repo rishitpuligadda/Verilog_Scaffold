@@ -1,39 +1,38 @@
-# lib/file_flag.tcl 
+# lib/file_flag.tcl - generate an empty design or testbench from a file name
+#
+#   counter / counter.v   -> design module "counter"
+#   tb_counter            -> testbench "tb_counter" for DUT "counter"
+#   counter_tb            -> testbench "counter_tb" for DUT "counter"
+#
+# The path is used as given (relative to the current directory).
 
-proc file_flag {file_name} {
+proc file_flag {file_name {force 0}} {
     if {$file_name eq ""} {
-        puts stderr "USAGE: ./generate_verilog.tcl [-file] <filename> \[-config <config.json>\]"
-        exit 1
+        error "no file name given"
     }
 
-    # Guard: prevent clobbering JSON configuration files
-    if {[file extension $file_name] eq ".json"} {
-        puts stderr "ERROR: '$file_name' is a JSON config file. Did you mean to use '-config $file_name'?"
-        exit 1
+    set ext [string tolower [file extension $file_name]]
+    if {$ext eq ".json"} {
+        error "'$file_name' is a JSON config file. Did you mean '-config $file_name'?"
+    }
+    if {$ext eq ""} {
+        append file_name ".v"
+    } elseif {$ext ni {.v .sv}} {
+        error "unsupported extension '$ext' (expected .v or .sv)"
     }
 
-    # Ensure .v extension
-    if {[file extension $file_name] eq ""} {
-        set file_name "${file_name}.v"
-    }
-
-    # Extract clean module name without directory paths
     set mod_name [file rootname [file tail $file_name]]
+    check_ident "module" $mod_name
 
-    # Ensure parent directory exists if a path was supplied
-    set out_dir [file dirname $file_name]
-    if {$out_dir ne "" && $out_dir ne "." && ![file exists $out_dir]} {
-        file mkdir $out_dir
-    }
-
-    set fp [open $file_name w] 
-
-    if {[string match "tb_*" $mod_name] || [string match "*_tb" $mod_name] || $mod_name eq "tb"} {
-        tb_template $mod_name $fp
+    if {[regexp {^tb_(.+)$} $mod_name -> dut] || [regexp {^(.+)_tb$} $mod_name -> dut]} {
+        set content [tb_template $dut {} {} {} {} $mod_name]
+    } elseif {$mod_name eq "tb"} {
+        set content [tb_template "" {} {} {} {} $mod_name]
     } else {
-        design_template $mod_name $fp
+        set content [design_template $mod_name]
     }
 
-    close $fp
+    check_writable [list $file_name] $force
+    write_output $file_name $content
     puts "Generated file: $file_name (module: $mod_name)"
 }

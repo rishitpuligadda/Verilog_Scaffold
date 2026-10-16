@@ -1,6 +1,6 @@
 {
   "module": "dual_clock_fifo",
-  "path": "../test_files/verilog",
+  "path": "../verilog",
   "clocks": {
     "wr_clk": 10,
     "rd_clk": 25
