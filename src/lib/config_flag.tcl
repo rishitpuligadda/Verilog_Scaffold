@@ -36,9 +36,10 @@ proc config_flag {config_file} {
             set outputs [dict get $ports outputs]
         }
     }
-
-    puts "Module:  $mod_name"
-    puts "Inputs:  $inputs"
-    puts "Outputs: $outputs"
-	puts "Parsed through config file"
+	
+	set file_name "${mod_name}.v"
+	set fp [open $file_name w]
+	design_template $mod_name $fp $inputs $outputs
+	close $fp
+	puts "Generated design from config: $file_name"
 }
