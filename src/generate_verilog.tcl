@@ -24,7 +24,7 @@ set script_dir [file dirname $script_path]
 set lib_dir    [file join $script_dir "lib"]
 
 # --- Source libraries in dependency order ---
-foreach lib {utils.tcl design_tpl.tcl tb_tpl.tcl file_flag.tcl config_flag.tcl init_flag.tcl} {
+foreach lib {utils.tcl verilog_parse.tcl design_tpl.tcl tb_tpl.tcl file_flag.tcl config_flag.tcl init_flag.tcl} {
     set path [file join $lib_dir $lib]
     if {![file readable $path]} {
         puts stderr "ERROR: missing library file: $path"

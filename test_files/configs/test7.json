@@ -1,5 +1,5 @@
 // vscaff config template: clocked design
-// Created with: vscaff -init test7.json -i 6 -o 3
+// Created with: vscaff -init test7.json
 //
 // 1. Replace every "<placeholder>" below (-config refuses to run until you do).
 // 2. Adjust widths, types, parameters and clocks as needed.
@@ -49,20 +49,25 @@
         // Names with rst/reset are driven as resets in the testbench
         // (rst_n, wr_rst_n = active-low; rst, reset = active-high).
         "inputs": [
-            { "name": "<input_1>", "width": 1, "type": "wire" },
-            { "name": "<input_2>", "width": 1, "type": "wire" },
-            { "name": "<input_3>", "width": 1, "type": "wire" },
-            { "name": "<input_4>", "width": 1, "type": "wire" },
-            { "name": "<input_5>", "width": 1, "type": "wire" },
-            { "name": "<input_6>", "width": 1, "type": "wire" }
+            { "name": "<input_1>", "width": 1, "type": "wire" }
         ],
 
         // Outputs: same fields as inputs, but "type" can be "wire" or "reg".
         // Use "reg" for outputs you assign inside an always block.
         "outputs": [
-            { "name": "<output_1>", "width": 1, "type": "wire" },
-            { "name": "<output_2>", "width": 1, "type": "wire" },
-            { "name": "<output_3>", "width": 1, "type": "wire" }
+            { "name": "<output_1>", "width": 1, "type": "wire" }
         ]
-    }
+    },
+
+    // Submodules to instantiate inside the design (optional), one { ... } each:
+    //   "module"  name of the module to instantiate (required)
+    //   "path"    the .v/.sv file that defines it, relative to THIS config (required)
+    //   "name"    instance name (optional; default u_<module>)
+    // The module's ports and parameters are read from that file, and the
+    // instance is written with every connection empty, ready to fill in:
+    //   "instances": [
+    //       { "module": "fifo", "path": "../rtl/fifo.v" },
+    //       { "module": "uart_tx", "path": "../rtl/uart_tx.v", "name": "u_tx" }
+    //   ]
+    "instances": []
 }

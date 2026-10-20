@@ -121,7 +121,19 @@ proc init_flag {file_name {n_in 1} {n_out 1} {comb 0} {force 0}} {
         // Outputs: same fields as inputs, but "type" can be "wire" or "reg".
         // Use "reg" for outputs you assign inside an always block.
         @OUTPUTS@
-    }
+    },
+
+    // Submodules to instantiate inside the design (optional), one { ... } each:
+    //   "module"  name of the module to instantiate (required)
+    //   "path"    the .v/.sv file that defines it, relative to THIS config (required)
+    //   "name"    instance name (optional; default u_<module>)
+    // The module's ports and parameters are read from that file, and the
+    // instance is written with every connection empty, ready to fill in:
+    //   "instances": [
+    //       { "module": "fifo", "path": "../rtl/fifo.v" },
+    //       { "module": "uart_tx", "path": "../rtl/uart_tx.v", "name": "u_tx" }
+    //   ]
+    "instances": []
 }}]
 
     check_writable [list $file_name] $force

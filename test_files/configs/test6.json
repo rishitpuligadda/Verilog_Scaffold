@@ -1,25 +1,25 @@
-// vscaff config template: clocked design
-// Created with: vscaff -init test6.json
+// vscaff config template: combinational (no clocks) design
+// Created with: vscaff -init test6.json -comb -i 3 -o 2
 //
 // 1. Replace every "<placeholder>" below (-config refuses to run until you do).
-// 2. Adjust widths, types, parameters and clocks as needed.
+// 2. Adjust widths, types and parameters as needed.
 // 3. Generate the design and testbench:  vscaff -config test6.json
 //
 // Comments like these are allowed anywhere, and a trailing comma after the
 // last item in a list is fine, so you can delete entries freely.
 {
     // Module name: letters, digits and _, not starting with a digit.
-    "module": "<module_name>",
+    "module": "full_adder",
 
     // Where to write the design: a directory (e.g. "../rtl") or a full
     // .v/.sv file path. Relative paths are relative to THIS config file.
     // Delete this line to write the design to the current directory.
-    "design_path": "<path/to/design_dir>",
+    "design_path": "../verilog/",
 
     // Where to write the testbench: a directory or a full .v/.sv file path.
     // If you give a file name, it also becomes the testbench module name.
     // Delete this line to put the testbench next to the design.
-    "tb_path": "<path/to/tb_dir>",
+    "tb_path": "../verilog",
 
     // Generate a testbench too? true or false.
     "generate_tb": true,
@@ -27,18 +27,6 @@
     // Parameters: "NAME": default value. The value is copied into the
     // Verilog as-is, so literals like "8'hFF" work. A parameter name can be
     // used as a port width, e.g. "width": "WIDTH". Use {} for no parameters.
-    "parameters": {
-        "WIDTH": 8
-    },
-
-    // Clocks: "name": period in ns (decimals allowed, e.g. 12.5).
-    // Each clock is added as a 1-bit input automatically, so don't list it
-    // under "inputs" as well. The testbench gets one clock generator per clock.
-    // Add more clocks as "name": period pairs, separated by commas.
-    "clocks": {
-        "clk": 10
-    },
-
     "ports": {
         // Inputs, one { ... } per port:
         //   "name"   port name (required)
@@ -49,13 +37,16 @@
         // Names with rst/reset are driven as resets in the testbench
         // (rst_n, wr_rst_n = active-low; rst, reset = active-high).
         "inputs": [
-            { "name": "<input_1>", "width": 1, "type": "wire" }
+            { "name": "a", "width": 1, "type": "wire" },
+            { "name": "b", "width": 1, "type": "wire" },
+            { "name": "cin", "width": 1, "type": "wire" }
         ],
 
         // Outputs: same fields as inputs, but "type" can be "wire" or "reg".
         // Use "reg" for outputs you assign inside an always block.
         "outputs": [
-            { "name": "<output_1>", "width": 1, "type": "wire" }
+            { "name": "sum", "width": 1, "type": "wire" },
+            { "name": "cout", "width": 1, "type": "wire" }
         ]
     }
 }

@@ -35,6 +35,7 @@ The goal is to skip the repetitive boilerplate of starting a new module so you c
   - [Port widths](#port-widths)
   - [Port types](#port-types)
   - [`generate_tb`](#generate_tb)
+  - [`instances`](#instances)
 - [What Gets Generated](#what-gets-generated)
   - [The design file](#the-design-file)
   - [The testbench file](#the-testbench-file)
@@ -297,7 +298,7 @@ Every template contains:
 - **A header** recording the exact command that created it, plus the three steps to follow.
 - **A comment above every setting** explaining what it does and which values are allowed.
 - **`"<placeholders>"`** wherever you must supply your own value: the module name, the design and testbench paths, and each port name (`<input_1>`, `<input_2>`, ..., `<output_1>`, ...).
-- **Working defaults** for everything else: every port has all of its fields (`name`, `width`, `type`), along with a `WIDTH` parameter, a 10 ns `clk` clock (unless `-comb`), and `"generate_tb": true`.
+- **Working defaults** for everything else: every port has all of its fields (`name`, `width`, `type`), along with a `WIDTH` parameter, a 10 ns `clk` clock (unless `-comb`), `"generate_tb": true`, and an empty `instances` list with a commented example.
 
 This is the template from `vscaff -init uart_tx.json`:
 
@@ -361,7 +362,19 @@ This is the template from `vscaff -init uart_tx.json`:
         "outputs": [
             { "name": "<output_1>", "width": 1, "type": "wire" }
         ]
-    }
+    },
+
+    // Submodules to instantiate inside the design (optional), one { ... } each:
+    //   "module"  name of the module to instantiate (required)
+    //   "path"    the .v/.sv file that defines it, relative to THIS config (required)
+    //   "name"    instance name (optional; default u_<module>)
+    // The module's ports and parameters are read from that file, and the
+    // instance is written with every connection empty, ready to fill in:
+    //   "instances": [
+    //       { "module": "fifo", "path": "../rtl/fifo.v" },
+    //       { "module": "uart_tx", "path": "../rtl/uart_tx.v", "name": "u_tx" }
+    //   ]
+    "instances": []
 }
 ```
 
@@ -472,6 +485,7 @@ This is `test_files/configs/test2.json`, which uses every major feature:
 | `ports.outputs` | no | array | none | Output ports |
 | `generate_tb` | no | boolean | `true` | Whether to generate a testbench |
 | `tb` | no | boolean | `true` | Alias for `generate_tb` (`generate_tb` wins if both are set) |
+| `instances` | no | array | none | Submodules to instantiate in the design; their ports are read from their source files |
 
 Each key is explained in detail below.
 
@@ -633,6 +647,94 @@ Use `"type": "reg"` on outputs you'll drive from an `always` block. `input reg` 
 
 Set this to `false` to generate only the design file. It defaults to `true`. `tb` is accepted as an alias, and if both are present, `generate_tb` takes priority. The value must be a boolean; anything else, such as `"maybe"`, is rejected.
 
+### `instances`
+
+Lists submodules to instantiate inside the generated design. For each one, you give the module name and the file that defines it. vscaff opens that file, finds the module, reads its parameters and ports, and writes a complete instantiation with **every connection left empty**, ready for you to wire up.
+
+```json
+"instances": [
+    { "module": "fifo",      "path": "../rtl/fifo.v" },
+    { "module": "uart_tx",   "path": "../rtl/uart.v", "name": "u_tx" }
+]
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `module` | **yes** | Name of the module to instantiate |
+| `path` | **yes** | The `.v`/`.sv` file that defines it. Relative paths are resolved against the config file's directory, like `design_path`. |
+| `name` | no | Instance name. Defaults to `u_<module>`. |
+
+If the same module is listed more than once without a `name`, the instances are numbered: `u_fifo_0`, `u_fifo_1`, and so on. Several modules can come from the same file.
+
+For a `fifo` defined as:
+
+```verilog
+module fifo #(
+    parameter DATA_WIDTH = 8,
+    parameter DEPTH      = 16
+) (
+    input  wire                  clk,
+    input  wire                  rst_n,
+    input  wire [DATA_WIDTH-1:0] din,
+    output reg  [DATA_WIDTH-1:0] dout,
+    output                       full, empty
+);
+```
+
+the generated design contains:
+
+```verilog
+    // Submodule instances: connect each port inside its ( )
+
+    fifo #(
+        .DATA_WIDTH (),  // default: 8
+        .DEPTH      ()   // default: 16
+    ) u_fifo (
+        .clk   (),  // input
+        .rst_n (),  // input
+        .din   (),  // input [DATA_WIDTH-1:0]
+        .dout  (),  // output [DATA_WIDTH-1:0]
+        .full  (),  // output
+        .empty ()   // output
+    );
+
+    // TODO: implement design logic
+```
+
+What you get:
+
+- **Every port**, in the submodule's declaration order, as `.port ()`. Each line has a comment showing the port's direction and width, so you can wire it up without opening the submodule's file.
+- **Every overridable parameter** as `.PARAM ()`, with its default value in a comment. An empty parameter override keeps the default, so the design compiles as generated. Put a value inside the `( )` to override it.
+- Instances placed above the `// TODO` marker, in the order you listed them.
+
+The generated design compiles straight away (checked with Icarus Verilog and Verilator). Unconnected inputs only produce warnings until you fill them in.
+
+**Remember to compile the submodule sources too.** After generating, vscaff lists the files you need:
+
+```
+Instantiated:        u_fifo (fifo), u_tx (uart_tx)
+Remember to compile the submodule source(s) too:
+    /home/you/project/rtl/fifo.v
+    /home/you/project/rtl/uart.v
+```
+
+For example: `iverilog -o sim rtl/top.v rtl/fifo.v rtl/uart.v sim/tb_top.v`.
+
+**What the module reader understands:**
+
+| Style | Example | Supported |
+|---|---|---|
+| ANSI headers (Verilog-2001) | `module m (input [7:0] a, output y);` | Yes |
+| Shared declarations | `input [7:0] a, b` (`b` is also 8 bits) | Yes |
+| Non-ANSI headers (Verilog-1995) | `module m (a, y); input [7:0] a; output y;` | Yes; directions and widths are read from the body |
+| Parameter lists | `#(parameter W = 8, D = 4)` | Yes |
+| Body parameters (no `#( )` list) | `parameter N = 4;` | Yes |
+| `localparam` | `localparam L = 2;` | Skipped, since they can't be overridden |
+| Comments and strings | `// module fake(...)`, `$display("module x")` | Ignored correctly |
+| Compiler directives | `` `timescale ``, `` `define ``, `` `include `` | Skipped |
+
+If the module isn't in the file, the error lists the modules the file *does* define, which helps catch typos.
+
 ---
 
 ## What Gets Generated
@@ -645,6 +747,7 @@ The design file contains:
 - The module header with:
   - a `#( ... )` parameter list, if parameters were given;
   - the port list: clocks, then inputs, then outputs, with direction, type, width and name aligned in columns.
+- Any submodule [instances](#instances) from the config, with empty connections.
 - A `// TODO: implement design logic` placeholder where your code goes.
 - `endmodule`
 
@@ -891,6 +994,12 @@ Everything is checked before any file is written, so the tool fails early with a
 | Testbench file named like the design | `testbench module name 'uart_tx' is the same as the design module name` |
 | Invalid testbench file name | `invalid testbench module name 'my-tb': ...` |
 | Design and testbench on the same file | `design and testbench would both be written to '...'` |
+| Instance module not in its file | `instance #1 (fifoo): module 'fifoo' not found in .../lib.v (it defines: fifo, uart_tx)` |
+| Instance source file missing | `instance #1 (fifo): file not found or not readable: .../nope.v` |
+| Instance without `path` | `instance #1 (fifo): missing "path" to the file that defines 'fifo'` |
+| Duplicate instance names | `instance #2 (fifo): instance name 'u1' is used more than once (set "name" to make it unique)` |
+| Instance named like a port | `instance #1 (fifo): instance name 'busy' clashes with a port of the same name` |
+| Module instantiating itself | `instance #1 (top): a module cannot instantiate itself` |
 
 **File mode checks:** invalid or reserved module names, unsupported extensions, and `.json` file names (with a hint to use `-config`).
 
@@ -941,6 +1050,7 @@ verilog_scaffold/
 │       ├── file_flag.tcl        # -file mode: name-based skeleton generation
 │       ├── config_flag.tcl      # -config mode: JSON parsing, validation, port normalisation
 │       ├── init_flag.tcl        # -init mode: commented config templates
+│       ├── verilog_parse.tcl    # Reads module parameters and ports from Verilog files (for instances)
 │       ├── design_tpl.tcl       # Design module template
 │       └── tb_tpl.tcl           # Testbench template
 └── test_files/
@@ -951,7 +1061,7 @@ verilog_scaffold/
 How the pieces fit together:
 
 1. `generate_verilog.tcl` parses the command line, loads the libraries in `lib/`, and calls `file_flag`, `config_flag` or `init_flag`.
-2. `config_flag` reads and validates the JSON, then converts every port into a uniform `{type width name}` form.
+2. `config_flag` reads and validates the JSON, then converts every port into a uniform `{type width name}` form. For each entry in `instances`, `verilog_parse.tcl` reads the submodule's interface from its source file.
 3. `design_tpl.tcl` and `tb_tpl.tcl` turn that description into Verilog text.
 4. `utils.tcl` checks that the output paths are safe to write, then writes the files.
 
@@ -966,4 +1076,6 @@ How the pieces fit together:
 - **The design body is empty.** The tool generates the module interface only; you write the logic.
 - **Testbench stimulus is a placeholder.** The testbench sets up clocks, resets, the DUT and monitoring, but the actual test sequence is left for you to write.
 - **Fixed timescale.** All files use `` `timescale 1ns / 1ps ``, and clock periods are always in ns.
+- **Module reader limits.** Instances are read with a lightweight parser, not a full Verilog front end. Ports inside `` `ifdef `` blocks are all included (both branches), macros aren't expanded, and SystemVerilog interface ports and escaped identifiers (`\name`) aren't fully supported.
+- **Instance connections are left empty.** vscaff writes `.port ()` and doesn't try to guess which signals to connect.
 - **Name-based detection.** Auto-detected clocks and resets depend on naming conventions. Declare clocks explicitly under `clocks` if your names don't follow these patterns.

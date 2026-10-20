@@ -20,6 +20,11 @@
 #   ports       { "inputs": [...], "outputs": [...] }
 #               each port is "name" or { "name": ..., "width": ..., "type": ... }
 #   generate_tb true/false (alias: "tb"), default true
+#   instances   [ { "module": ..., "path": ..., "name": ... }, ... ]
+#               submodules to instantiate in the design. Each module's ports
+#               and parameters are read from "path" (relative to the config
+#               file) and connected as .port (), ready to fill in. "name" is
+#               optional (default u_<module>, numbered if used more than once).
 
 
 # Turn a JSON width into a Verilog range: 8 -> [7:0], "W" -> [W-1:0], "7:0" -> [7:0]
@@ -117,6 +122,88 @@ proc resolve_output {raw config_file default_dir default_name} {
         return [file normalize $raw]
     }
     return [file normalize [file join $raw $default_name]]
+}
+
+# Read the "instances" list: find each module in its file and collect its
+# parameters and ports. Returns a list of dicts for design_template.
+proc read_instances {raw config_file mod_name port_names} {
+    set config_dir [file dirname [file normalize $config_file]]
+
+    # First pass: validate entries and count unnamed uses of each module
+    set entries {}
+    set unnamed [dict create]
+    set k 0
+    foreach item $raw {
+        incr k
+        set where "instance #$k"
+        if {[llength $item] % 2 != 0 || ![dict exists $item module]} {
+            error "$where: each entry needs at least \"module\" and \"path\""
+        }
+        set sub [string trim [dict get $item module]]
+        if {[catch {check_ident "module" $sub} msg]} {
+            error "$where: $msg"
+        }
+        set where "instance #$k ($sub)"
+        if {$sub eq $mod_name} {
+            error "$where: a module cannot instantiate itself"
+        }
+        if {![dict exists $item path] || [string trim [dict get $item path]] eq ""} {
+            error "$where: missing \"path\" to the file that defines '$sub'"
+        }
+        set path [string trim [dict get $item path]]
+        if {[file pathtype $path] eq "relative"} {
+            set path [file join $config_dir $path]
+        }
+        set path [file normalize $path]
+        set name ""
+        if {[dict exists $item name]} {
+            set name [string trim [dict get $item name]]
+            if {[catch {check_ident "instance" $name} msg]} {
+                error "$where: $msg"
+            }
+        } else {
+            dict incr unnamed $sub
+        }
+        lappend entries [list $where $sub $path $name]
+    }
+
+    # Second pass: default names (u_fifo, or u_fifo_0, u_fifo_1, ... when a
+    # module is used more than once without a name), then parse each file
+    set seen_names [dict create]
+    set counters   [dict create]
+    set cache      [dict create]
+    set instances  {}
+    foreach e $entries {
+        lassign $e where sub path name
+        if {$name eq ""} {
+            if {[dict get $unnamed $sub] > 1} {
+                set n [expr {[dict exists $counters $sub] ? [dict get $counters $sub] : 0}]
+                dict set counters $sub [expr {$n + 1}]
+                set name "u_${sub}_$n"
+            } else {
+                set name "u_$sub"
+            }
+        }
+        if {[dict exists $seen_names $name]} {
+            error "$where: instance name '$name' is used more than once (set \"name\" to make it unique)"
+        }
+        if {$name in $port_names} {
+            error "$where: instance name '$name' clashes with a port of the same name"
+        }
+        dict set seen_names $name 1
+
+        set key [list $path $sub]
+        if {![dict exists $cache $key]} {
+            if {[catch {parse_module_interface $path $sub} iface]} {
+                error "$where: $iface"
+            }
+            dict set cache $key $iface
+        }
+        set iface [dict get $cache $key]
+        lappend instances [dict create module $sub name $name path $path \
+                               params [dict get $iface params] ports [dict get $iface ports]]
+    }
+    return $instances
 }
 
 proc config_flag {config_file {force 0}} {
@@ -262,8 +349,15 @@ proc config_flag {config_file {force 0}} {
         }
     }
 
-    # 8. Generate everything first, then write
-    set files [list $out_file [design_template $mod_name $inputs $outputs $params]]
+    # 8. Submodule instances
+    set instances {}
+    if {[dict exists $data instances]} {
+        set instances [read_instances [dict get $data instances] $config_file \
+                           $mod_name [concat [lmap p $inputs {lindex $p 2}] $out_names]]
+    }
+
+    # 9. Generate everything first, then write
+    set files [list $out_file [design_template $mod_name $inputs $outputs $params $instances]]
     if {$generate_tb} {
         lappend files $tb_file [tb_template $mod_name $inputs $outputs $params $clocks $tb_name]
     }
@@ -278,5 +372,13 @@ proc config_flag {config_file {force 0}} {
         puts "Generated testbench: $tb_file"
     } else {
         puts "Skipped testbench:   disabled by config"
+    }
+    if {[llength $instances] > 0} {
+        set sources [lsort -unique [lmap i $instances {dict get $i path}]]
+        puts "Instantiated:        [join [lmap i $instances {string cat [dict get $i name] " (" [dict get $i module] ")"}] {, }]"
+        puts "Remember to compile the submodule source(s) too:"
+        foreach src $sources {
+            puts "    $src"
+        }
     }
 }
