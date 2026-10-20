@@ -21,7 +21,9 @@ The goal is to skip the repetitive boilerplate of starting a new module so you c
   - [Command-line options](#command-line-options)
   - [Mode 1: File mode (`-file`)](#mode-1-file-mode--file)
   - [Mode 2: Config mode (`-config`)](#mode-2-config-mode--config)
+  - [Mode 3: Config templates (`-init`)](#mode-3-config-templates--init)
 - [The Config File](#the-config-file)
+  - [Comments and trailing commas](#comments-and-trailing-commas)
   - [Minimal example](#minimal-example)
   - [Full example](#full-example)
   - [Key reference](#key-reference)
@@ -60,7 +62,8 @@ cd verilog_scaffold
 # Then, from any directory:
 vscaff counter                                        # empty design   -> counter.v
 vscaff tb_counter                                     # empty testbench -> tb_counter.v
-vscaff -config test_files/configs/test2.json          # design + testbench from JSON
+vscaff -init uart_tx.json -i 3 -o 2                   # config template to fill in
+vscaff -config uart_tx.json                           # design + testbench from the config
 ```
 
 ---
@@ -167,6 +170,7 @@ The script finds its own `lib/` folder automatically, including when it's called
 ```
 vscaff [-force] -file <filename>
 vscaff [-force] -config <config.json>
+vscaff [-force] -init [config.json] [-comb] [-i N] [-o N]
 ```
 
 ### Command-line options
@@ -175,13 +179,18 @@ vscaff [-force] -config <config.json>
 |---|---|
 | `-file <name>` | Generate an empty design or testbench skeleton named `<name>`. The `-file` keyword is optional: a bare name works too. |
 | `-config <file.json>` | Generate a fully declared design (and, by default, a testbench) from a JSON config. |
+| `-init [file.json]` | Write a commented config template to fill in (default name: `config.json`). See [Mode 3](#mode-3-config-templates--init). |
+| `-comb` | With `-init`: template for a combinational design, with no `clocks` section |
+| `-i N`, `-inputs N` | With `-init`: put N input ports in the template (default 1) |
+| `-o N`, `-outputs N` | With `-init`: put N output ports in the template (default 1) |
 | `-force` | Overwrite output files that already exist. Without it, the tool refuses to overwrite anything. |
 | `-debug` | On error, print the full Tcl stack trace instead of a one-line message. |
 | `-h`, `-help`, `--help` | Show the help text and exit. |
 
 Rules:
 
-- Use **either** `-file` **or** `-config`, not both.
+- Use only one of `-file`, `-config` and `-init` at a time.
+- `-comb`, `-i` and `-o` only work together with `-init`.
 - Each option may be given only once.
 - Unknown options (for example, a typo like `-confg`) are rejected with an error rather than ignored.
 - The exit status is `0` on success and `1` on any error, so the tool is safe to use in scripts and Makefiles.
@@ -261,13 +270,146 @@ Generated design:    /home/you/verilog_scaffold/test_files/verilog/dual_clock_fi
 Generated testbench: /home/you/verilog_scaffold/test_files/verilog/tb_dual_clock_fifo.v
 ```
 
-The format of the config file is described in the next section.
+Don't want to write a config from scratch? Generate a ready-made template with [`-init`](#mode-3-config-templates--init) and fill it in. The full format of the config file is described in [The Config File](#the-config-file).
+
+### Mode 3: Config templates (`-init`)
+
+`-init` writes a **config template**: a complete, commented config file with every section already in place. You replace the `<placeholders>` and adjust the values instead of writing JSON from scratch.
+
+```bash
+vscaff -init                                  # config.json: 1 input, 1 output, with a clock
+vscaff -init uart_tx.json                     # same, named uart_tx.json
+vscaff -init alu.json -comb -i 5 -o 3         # combinational, 5 inputs, 3 outputs
+vscaff -init -i 4 fifo.json                   # the file name can also come after the flags
+```
+
+| Flag | Effect on the template |
+|---|---|
+| *(none)* | 1 input, 1 output, 1 parameter and 1 clock |
+| `-comb` | No `clocks` section, for combinational designs (no clock generator in the testbench) |
+| `-i N` / `-inputs N` | N input ports (0 or more) |
+| `-o N` / `-outputs N` | N output ports (0 or more) |
+
+The file name is optional and defaults to `config.json`. `.json` is added if you leave out the extension, and `.jsonc` is also accepted. Like every vscaff output, an existing file is never overwritten unless you add `-force`.
+
+Every template contains:
+
+- **A header** recording the exact command that created it, plus the three steps to follow.
+- **A comment above every setting** explaining what it does and which values are allowed.
+- **`"<placeholders>"`** wherever you must supply your own value: the module name, the design and testbench paths, and each port name (`<input_1>`, `<input_2>`, ..., `<output_1>`, ...).
+- **Working defaults** for everything else: every port has all of its fields (`name`, `width`, `type`), along with a `WIDTH` parameter, a 10 ns `clk` clock (unless `-comb`), and `"generate_tb": true`.
+
+This is the template from `vscaff -init uart_tx.json`:
+
+```jsonc
+// vscaff config template: clocked design
+// Created with: vscaff -init uart_tx.json
+//
+// 1. Replace every "<placeholder>" below (-config refuses to run until you do).
+// 2. Adjust widths, types, parameters and clocks as needed.
+// 3. Generate the design and testbench:  vscaff -config uart_tx.json
+//
+// Comments like these are allowed anywhere, and a trailing comma after the
+// last item in a list is fine, so you can delete entries freely.
+{
+    // Module name: letters, digits and _, not starting with a digit.
+    "module": "<module_name>",
+
+    // Where to write the design: a directory (e.g. "../rtl") or a full
+    // .v/.sv file path. Relative paths are relative to THIS config file.
+    // Delete this line to write the design to the current directory.
+    "design_path": "<path/to/design_dir>",
+
+    // Where to write the testbench: a directory or a full .v/.sv file path.
+    // If you give a file name, it also becomes the testbench module name.
+    // Delete this line to put the testbench next to the design.
+    "tb_path": "<path/to/tb_dir>",
+
+    // Generate a testbench too? true or false.
+    "generate_tb": true,
+
+    // Parameters: "NAME": default value. The value is copied into the
+    // Verilog as-is, so literals like "8'hFF" work. A parameter name can be
+    // used as a port width, e.g. "width": "WIDTH". Use {} for no parameters.
+    "parameters": {
+        "WIDTH": 8
+    },
+
+    // Clocks: "name": period in ns (decimals allowed, e.g. 12.5).
+    // Each clock is added as a 1-bit input automatically, so don't list it
+    // under "inputs" as well. The testbench gets one clock generator per clock.
+    // Add more clocks as "name": period pairs, separated by commas.
+    "clocks": {
+        "clk": 10
+    },
+
+    "ports": {
+        // Inputs, one { ... } per port:
+        //   "name"   port name (required)
+        //   "width"  1 = single bit; N = [N-1:0]; a parameter name such as
+        //            "WIDTH" = [WIDTH-1:0]; or an explicit range like "7:0"
+        //   "type"   inputs can only be "wire" (or leave the field out)
+        // Shorthand: a plain string like "rst_n" is a 1-bit input.
+        // Names with rst/reset are driven as resets in the testbench
+        // (rst_n, wr_rst_n = active-low; rst, reset = active-high).
+        "inputs": [
+            { "name": "<input_1>", "width": 1, "type": "wire" }
+        ],
+
+        // Outputs: same fields as inputs, but "type" can be "wire" or "reg".
+        // Use "reg" for outputs you assign inside an always block.
+        "outputs": [
+            { "name": "<output_1>", "width": 1, "type": "wire" }
+        ]
+    }
+}
+```
+
+**Forgotten placeholders are caught.** If you run `-config` before replacing every placeholder, nothing is generated, and you get a list of what's left, with line numbers:
+
+```
+ERROR: the config still has placeholders to fill in:
+    <module_name> (line 12)
+    <path/to/design_dir> (line 17)
+    <input_1> (line 52)
+```
+
+A string value counts as a placeholder when it's entirely wrapped in `<` and `>`, such as `"<input_1>"`. Placeholders inside comments are ignored.
+
+**Typical workflow:**
+
+```bash
+vscaff -init uart_tx.json -i 3 -o 2     # 1. create the template
+nano uart_tx.json                       # 2. fill in the placeholders (any editor)
+vscaff -config uart_tx.json             # 3. generate design + testbench
+```
 
 ---
 
 ## The Config File
 
-Config files must be **JSON** (with a `.json` extension). This is currently the only supported config format.
+Config files are **JSON**, with a `.json` (or `.jsonc`) extension. JSON is currently the only supported config format. The quickest way to start one is [`vscaff -init`](#mode-3-config-templates--init).
+
+### Comments and trailing commas
+
+vscaff accepts two additions to standard JSON, so configs are easier to write and to annotate:
+
+```jsonc
+{
+    // Line comments, like this one
+    "module": "alu",       // also at the end of a line
+    /* and block comments,
+       across several lines */
+    "ports": {
+        "inputs":  ["a", "b",],    // a trailing comma before ] or } is fine
+        "outputs": ["y"]
+    }
+}
+```
+
+Comment markers inside strings are left alone, so a value like `"a//b"` is safe. Plain JSON without comments works exactly as before.
+
+**Note for VS Code users:** VS Code underlines comments in `.json` files as errors, even though vscaff accepts them. Name the file `.jsonc`, or pick "JSON with Comments" as the file's language mode, to avoid this.
 
 ### Minimal example
 
@@ -728,7 +870,9 @@ Everything is checked before any file is written, so the tool fails early with a
 |---|---|
 | Tcllib not installed | `the Tcl 'json' package (part of Tcllib) is not installed. ...` |
 | File missing or unreadable | `configuration file 'x.json' not found or not readable` |
-| Not a `.json` file | `unsupported config format '.yaml' (expected .json)` |
+| Not a `.json`/`.jsonc` file | `unsupported config format '.yaml' (expected .json or .jsonc)` |
+| Unfilled template placeholders | `the config still has placeholders to fill in: <module_name> (line 12) ...` |
+| Unclosed block comment | `unterminated /* comment starting on line 4` |
 | Malformed JSON | `invalid JSON in 'c.json': unexpected token "END" at position 8; expecting OBJECT` |
 | No `module` key | `'c.json' has no "module" key` |
 | Invalid name | `invalid module name 'my-counter': must start with a letter or underscore and contain only letters, digits, _ or $` |
@@ -793,9 +937,10 @@ verilog_scaffold/
 ├── src/
 │   ├── generate_verilog.tcl     # Entry point: argument parsing, library loading, error handling
 │   └── lib/
-│       ├── utils.tcl            # Shared helpers: name validation, alignment, safe file writing
+│       ├── utils.tcl            # Shared helpers: name validation, alignment, safe file writing, JSON comment handling
 │       ├── file_flag.tcl        # -file mode: name-based skeleton generation
 │       ├── config_flag.tcl      # -config mode: JSON parsing, validation, port normalisation
+│       ├── init_flag.tcl        # -init mode: commented config templates
 │       ├── design_tpl.tcl       # Design module template
 │       └── tb_tpl.tcl           # Testbench template
 └── test_files/
@@ -805,7 +950,7 @@ verilog_scaffold/
 
 How the pieces fit together:
 
-1. `generate_verilog.tcl` parses the command line, loads the libraries in `lib/`, and calls either `file_flag` or `config_flag`.
+1. `generate_verilog.tcl` parses the command line, loads the libraries in `lib/`, and calls `file_flag`, `config_flag` or `init_flag`.
 2. `config_flag` reads and validates the JSON, then converts every port into a uniform `{type width name}` form.
 3. `design_tpl.tcl` and `tb_tpl.tcl` turn that description into Verilog text.
 4. `utils.tcl` checks that the output paths are safe to write, then writes the files.
@@ -814,7 +959,7 @@ How the pieces fit together:
 
 ## Current Limitations
 
-- **JSON only.** Configs must be JSON. Other formats (YAML, TOML, etc.) are not supported yet.
+- **JSON only.** Configs must be JSON (comments and trailing commas allowed). Other formats (YAML, TOML, etc.) are not supported yet.
 - **Verilog only.** Output is Verilog-2001 style. `.sv` file names are accepted, but no SystemVerilog constructs (`logic`, interfaces, `always_ff`, etc.) are generated, and VHDL is not supported.
 - **No `inout` ports.** Only `inputs` and `outputs` are supported.
 - **No `signed` ports**, and no packed arrays or multi-dimensional ports.
