@@ -1,19 +1,26 @@
 # lib/config_flag.tcl - generate a design (and testbench) from a JSON config
 #
+# The config is JSON with two conveniences: // and /* */ comments are allowed,
+# and trailing commas are ignored. "vscaff -init" writes a commented template.
+#
 # Config keys:
 #   module      (required) module name
-#   path        output directory, or a full .v/.sv file path. A relative path
-#               is resolved against the directory containing the CONFIG FILE,
-#               so the output lands in the same place no matter where you run
-#               the script from. Without "path", files go to the current
-#               directory.
+#   design_path where to write the design: a directory, or a full .v/.sv file
+#               path. "path" is accepted as an alias (older configs).
+#               Default: the current directory.
+#   tb_path     where to write the testbench: a directory, or a full .v/.sv
+#               file path. If a file name is given, it also becomes the
+#               testbench module name. Default: next to the design.
+#
+#               Relative paths in design_path / tb_path are resolved against
+#               the directory containing the CONFIG FILE, so output lands in
+#               the same place no matter where you run the script from.
 #   parameters  { "NAME": value, ... }
 #   clocks      { "clk_name": period_ns, ... }   (legacy: "clk_period": N)
 #   ports       { "inputs": [...], "outputs": [...] }
 #               each port is "name" or { "name": ..., "width": ..., "type": ... }
 #   generate_tb true/false (alias: "tb"), default true
 
-package require json
 
 # Turn a JSON width into a Verilog range: 8 -> [7:0], "W" -> [W-1:0], "7:0" -> [7:0]
 proc parse_width {raw params port_name} {
@@ -86,18 +93,56 @@ proc config_bool {data key default} {
     return [string is true -strict $raw]
 }
 
+# Read an optional string value from the config ("" if absent).
+proc config_str {data key} {
+    if {![dict exists $data $key]} {
+        return ""
+    }
+    return [string trim [dict get $data $key]]
+}
+
+# Turn a config path value into an absolute output file path.
+#   raw:          value from the config ("" if not set)
+#   config_file:  relative values are resolved against this file's directory
+#   default_dir:  directory used when raw is empty
+#   default_name: file name used when raw is empty or names a directory
+proc resolve_output {raw config_file default_dir default_name} {
+    if {$raw eq ""} {
+        return [file normalize [file join $default_dir $default_name]]
+    }
+    if {[file pathtype $raw] eq "relative"} {
+        set raw [file join [file dirname [file normalize $config_file]] $raw]
+    }
+    if {[string tolower [file extension $raw]] in {.v .sv}} {
+        return [file normalize $raw]
+    }
+    return [file normalize [file join $raw $default_name]]
+}
+
 proc config_flag {config_file {force 0}} {
+    # Loaded here, not at the top of the file, so -file mode still works
+    # on machines without Tcllib.
+    if {[catch {package require json}]} {
+        error "the Tcl 'json' package (part of Tcllib) is not installed.\
+               Install it (e.g. 'sudo apt install tcllib') or re-run ./install.sh"
+    }
+
     if {![file readable $config_file]} {
         error "configuration file '$config_file' not found or not readable"
     }
     set ext [string tolower [file extension $config_file]]
-    if {$ext ne ".json"} {
-        error "unsupported config format '$ext' (expected .json)"
+    if {$ext ni {.json .jsonc}} {
+        error "unsupported config format '$ext' (expected .json or .jsonc)"
     }
 
     set fp [open $config_file r]
     set content [read $fp]
     close $fp
+
+    # Allow // and /* */ comments and trailing commas, then make sure no
+    # <placeholders> from an -init template are left
+    set content [clean_json $content]
+    check_placeholders $content
 
     if {[catch {json::json2dict $content} data]} {
         error "invalid JSON in '$config_file': $data"
@@ -110,25 +155,21 @@ proc config_flag {config_file {force 0}} {
     set mod_name [file rootname [file tail [string trim [dict get $data module]]]]
     check_ident "module" $mod_name
 
-    # 2. Output location
-    set target ""
-    if {[dict exists $data path]} {
-        set target [string trim [dict get $data path]]
+    # 2. Output locations
+    if {[dict exists $data path] && [dict exists $data design_path]} {
+        error "use either \"design_path\" or \"path\", not both"
     }
-    # Relative paths are relative to the config file's own directory
-    if {$target ne "" && [file pathtype $target] eq "relative"} {
-        set config_dir [file dirname [file normalize $config_file]]
-        set target [file join $config_dir $target]
+    set design_raw [config_str $data design_path]
+    if {$design_raw eq ""} {
+        set design_raw [config_str $data path]
     }
-    if {$target eq ""} {
-        set out_file "${mod_name}.v"
-    } elseif {[string tolower [file extension $target]] in {.v .sv}} {
-        set out_file $target
-    } else {
-        set out_file [file join $target "${mod_name}.v"]
-    }
-    set out_file [file normalize $out_file]
-    set out_dir  [file dirname $out_file]
+    set out_file [resolve_output $design_raw $config_file [pwd] "${mod_name}.v"]
+
+    # The testbench defaults to the design's directory and extension
+    set tb_raw  [config_str $data tb_path]
+    set tb_file [resolve_output $tb_raw $config_file [file dirname $out_file] \
+                    "tb_${mod_name}[file extension $out_file]"]
+    set tb_name [file rootname [file tail $tb_file]]
 
     # 3. Parameters
     set params [dict create]
@@ -145,6 +186,18 @@ proc config_flag {config_file {force 0}} {
     # 4. Testbench flag ("generate_tb" wins over the "tb" alias)
     set generate_tb [config_bool $data tb 1]
     set generate_tb [config_bool $data generate_tb $generate_tb]
+
+    if {$generate_tb} {
+        check_ident "testbench module" $tb_name
+        if {$tb_name eq $mod_name} {
+            error "testbench module name '$tb_name' is the same as the design module name"
+        }
+        if {$tb_file eq $out_file} {
+            error "design and testbench would both be written to '$out_file'"
+        }
+    } elseif {$tb_raw ne ""} {
+        puts "Note: \"tb_path\" is ignored because the testbench is disabled"
+    }
 
     # 5. Clocks
     set clocks [dict create]
@@ -212,8 +265,7 @@ proc config_flag {config_file {force 0}} {
     # 8. Generate everything first, then write
     set files [list $out_file [design_template $mod_name $inputs $outputs $params]]
     if {$generate_tb} {
-        set tb_file [file join $out_dir "tb_${mod_name}[file extension $out_file]"]
-        lappend files $tb_file [tb_template $mod_name $inputs $outputs $params $clocks]
+        lappend files $tb_file [tb_template $mod_name $inputs $outputs $params $clocks $tb_name]
     }
 
     check_writable [dict keys $files] $force

@@ -1,6 +1,6 @@
 # Verilog Scaffold
 
-A command-line tool, written in Tcl, that generates ready-to-edit Verilog design modules and matching testbenches. You can describe a module in a JSON config file and get a fully declared module (parameters, ports, widths) plus a testbench with clock generators, reset sequencing, a DUT instance and signal monitoring. Or you can give it just a file name and get an empty skeleton to start from.
+`vscaff` is a command-line tool, written in Tcl, that generates ready-to-edit Verilog design modules and matching testbenches. You can describe a module in a JSON config file and get a fully declared module (parameters, ports, widths) plus a testbench with clock generators, reset sequencing, a DUT instance and signal monitoring. Or you can give it just a file name and get an empty skeleton to start from.
 
 The goal is to skip the repetitive boilerplate of starting a new module so you can go straight to writing logic.
 
@@ -15,6 +15,8 @@ The goal is to skip the repetitive boilerplate of starting a new module so you c
 - [Quick Start](#quick-start)
 - [Requirements](#requirements)
 - [Installation](#installation)
+  - [Installer options](#installer-options)
+  - [Running without installing](#running-without-installing)
 - [Usage](#usage)
   - [Command-line options](#command-line-options)
   - [Mode 1: File mode (`-file`)](#mode-1-file-mode--file)
@@ -24,7 +26,7 @@ The goal is to skip the repetitive boilerplate of starting a new module so you c
   - [Full example](#full-example)
   - [Key reference](#key-reference)
   - [`module`](#module)
-  - [`path`](#path)
+  - [`design_path` and `tb_path`](#design_path-and-tb_path)
   - [`parameters`](#parameters)
   - [`clocks`](#clocks)
   - [`ports`](#ports)
@@ -51,60 +53,120 @@ The goal is to skip the repetitive boilerplate of starting a new module so you c
 ## Quick Start
 
 ```bash
-cd src
+git clone https://github.com/<your-username>/verilog_scaffold.git
+cd verilog_scaffold
+./install.sh                     # installs prerequisites + the "vscaff" command
 
-# Empty design module -> counter.v
-./generate_verilog.tcl counter
-
-# Empty testbench skeleton -> tb_counter.v
-./generate_verilog.tcl tb_counter
-
-# Full design + testbench from a JSON description
-./generate_verilog.tcl -config ../test_files/configs/test2.json
+# Then, from any directory:
+vscaff counter                                        # empty design   -> counter.v
+vscaff tb_counter                                     # empty testbench -> tb_counter.v
+vscaff -config test_files/configs/test2.json          # design + testbench from JSON
 ```
 
 ---
 
 ## Requirements
 
-| Requirement | Why |
-|---|---|
-| **Tcl 8.6+** (`tclsh`) | Runs the generator |
-| **Tcllib** | Provides the `json` package used to read config files |
-| *(Optional)* **Icarus Verilog** or any Verilog simulator | To compile and simulate the generated files |
+| Requirement | Why | Installed automatically? |
+|---|---|---|
+| **Tcl 8.6+** (`tclsh`) | Runs the generator | Yes, by `install.sh` |
+| **Tcllib** | Provides the `json` package used to read config files | Yes, by `install.sh` |
+| `git` | To clone the repository | No |
+| *(Optional)* **Icarus Verilog** or any Verilog simulator | To compile and simulate the generated files | No |
 
-On Ubuntu/Debian:
+You don't need to install Tcl or Tcllib yourself: `install.sh` detects your package manager and installs whatever is missing (see [Installation](#installation)).
 
-```bash
-sudo apt install tcl tcllib
-sudo apt install iverilog     # optional, for simulation
-```
-
-Check that everything is in place:
+For simulation on Ubuntu/Debian:
 
 ```bash
-echo 'package require json; puts "ok"' | tclsh
+sudo apt install iverilog
 ```
 
 ---
 
 ## Installation
 
+The repository includes an installer that sets up a `vscaff` command you can run from any directory, so you never need to type the script's full path.
+
 ```bash
 git clone https://github.com/<your-username>/verilog_scaffold.git
 cd verilog_scaffold
-chmod +x src/generate_verilog.tcl
+./install.sh
 ```
 
-You can run the script from any directory. It finds its own `lib/` folder automatically, even if you call it through a symlink (for example, one placed in `~/bin`). If you prefer not to make it executable, run it with `tclsh src/generate_verilog.tcl ...`.
+If you get `Permission denied`, run `bash install.sh` instead, or `chmod +x install.sh` first.
+
+What the installer does:
+
+1. **Checks the prerequisites** (Tcl 8.6 or newer, and Tcllib's `json` package) and **installs any that are missing** using your system's package manager. You'll be asked for your password once, because installing system packages needs administrator rights. If everything is already present, nothing is installed.
+2. Copies `src/` to `~/.local/share/verilog_scaffold/`.
+3. Creates the command `~/.local/bin/vscaff`, a link to the copied script.
+4. Runs `vscaff -h` to confirm the install works.
+5. **Adds `~/.local/bin` to your `PATH`** if it isn't there already, so `vscaff` works in every new terminal. It adds a small, clearly marked block to your shell's startup file:
+
+   | Your shell | File edited |
+   |---|---|
+   | bash (Linux) | `~/.bashrc` |
+   | bash (macOS) | `~/.bash_profile` |
+   | zsh | `~/.zshrc` |
+   | fish | `~/.config/fish/config.fish` |
+   | other | `~/.profile` |
+
+   The block is added only once, however many times you run the installer, and it never adds duplicate `PATH` entries. `./install.sh --uninstall` removes it again.
+
+After installing, **open a new terminal** and `vscaff` is ready. To use it in the terminal you installed from, run the `source ...` command the installer prints. (No installer can change the `PATH` of the terminal that started it.)
+
+Supported package managers for step 1:
+
+| System | Package manager | What gets installed |
+|---|---|---|
+| Ubuntu, Debian, Linux Mint, WSL | `apt` | `tcl`, `tcllib` |
+| Fedora, RHEL, Rocky, AlmaLinux | `dnf` / `yum` | `tcl`, `tcllib` |
+| Arch, Manjaro | `pacman` | `tcl`, `tcllib` |
+| openSUSE | `zypper` | `tcl`, `tcllib` |
+| Alpine | `apk` | `tcl`, `tcllib` |
+| macOS | Homebrew | `tcl-tk` (includes Tcllib) |
+
+After installing, the installer checks again that Tcl and the `json` package actually work, so you find out immediately if something went wrong. If the packages can't be installed (for example, no administrator access, or an unsupported system), the installer stops and prints the commands to install them yourself.
+
+**What happens without administrator access?** If you can't use `sudo`, ask an administrator to install `tcl` and `tcllib`, then run `./install.sh` again. Alternatively, run `./install.sh --no-deps` to install `vscaff` anyway and sort out the prerequisites later. Without Tcllib, file mode (`vscaff counter`) still works; only `-config` needs it.
+
+Because the files are copied, the command keeps working even if you later move or delete the cloned repository.
+
+### Installer options
+
+| Command | What it does |
+|---|---|
+| `./install.sh` | Install for your user as `vscaff` |
+| `./install.sh --name vgen` | Use a different command name |
+| `./install.sh --dev` | Link to the repository instead of copying it. Your edits to `src/` take effect immediately, which is useful while developing the tool. |
+| `sudo ./install.sh --prefix /usr/local` | Install for all users (into `/usr/local/bin` and `/usr/local/share`). Personal startup files are not edited; `/usr/local/bin` is normally on `PATH` already. |
+| `./install.sh --no-deps` | Don't install missing prerequisites; only check for them and print a warning |
+| `./install.sh --no-path` | Don't edit your shell's startup file; add the install directory to `PATH` yourself |
+| `./install.sh --uninstall` | Remove the command and the copied files. Pass the same `--name`/`--prefix` you installed with. Also removes the `PATH` block from your startup file. Tcl and Tcllib are left installed, since other programs may use them. |
+
+To **update** after pulling new changes, run `./install.sh` again. (This isn't needed with `--dev`.)
+
+The installer never overwrites a real file: if something that isn't its own link already exists at the target path, it stops with an error.
+
+### Running without installing
+
+You can also run the script directly from the repository, from any directory:
+
+```bash
+/path/to/verilog_scaffold/src/generate_verilog.tcl -config my_config.json
+tclsh /path/to/verilog_scaffold/src/generate_verilog.tcl counter
+```
+
+The script finds its own `lib/` folder automatically, including when it's called through a symlink. In this case, you need to install the prerequisites yourself (for example, `sudo apt install tcl tcllib`).
 
 ---
 
 ## Usage
 
 ```
-./generate_verilog.tcl [-force] -file <filename>
-./generate_verilog.tcl [-force] -config <config.json>
+vscaff [-force] -file <filename>
+vscaff [-force] -config <config.json>
 ```
 
 ### Command-line options
@@ -129,12 +191,12 @@ Rules:
 File mode creates an **empty skeleton** from nothing but a name. Use it when you want a correctly named, correctly formatted starting file and plan to write everything else yourself.
 
 ```bash
-./generate_verilog.tcl counter              # -> counter.v      (design)
-./generate_verilog.tcl -file alu.v          # -> alu.v          (design)
-./generate_verilog.tcl -file rtl/uart       # -> rtl/uart.v     (design, rtl/ created if missing)
-./generate_verilog.tcl -file tb_counter     # -> tb_counter.v   (testbench for "counter")
-./generate_verilog.tcl -file counter_tb     # -> counter_tb.v   (testbench for "counter")
-./generate_verilog.tcl -file fifo.sv        # -> fifo.sv        (Verilog code, .sv extension)
+vscaff counter              # -> counter.v      (design)
+vscaff -file alu.v          # -> alu.v          (design)
+vscaff -file rtl/uart       # -> rtl/uart.v     (design, rtl/ created if missing)
+vscaff -file tb_counter     # -> tb_counter.v   (testbench for "counter")
+vscaff -file counter_tb     # -> counter_tb.v   (testbench for "counter")
+vscaff -file fifo.sv        # -> fifo.sv        (Verilog code, .sv extension)
 ```
 
 How the name is interpreted:
@@ -154,7 +216,7 @@ Additional behaviour:
 - The path is used **as given**, relative to your current directory, and missing parent folders are created.
 - The module name must be a legal Verilog identifier and not a reserved keyword (see [Input validation](#input-validation)).
 
-A design skeleton (`./generate_verilog.tcl counter`) looks like this:
+A design skeleton (`vscaff counter`) looks like this:
 
 ```verilog
 `timescale 1ns / 1ps
@@ -166,7 +228,7 @@ module counter;
 endmodule
 ```
 
-A testbench skeleton (`./generate_verilog.tcl tb_counter`) looks like this:
+A testbench skeleton (`vscaff tb_counter`) looks like this:
 
 ```verilog
 `timescale 1ns / 1ps
@@ -190,7 +252,8 @@ Config mode reads a JSON file that describes the module and generates:
 2. **A testbench file** (unless disabled) with signals declared, clocks generated, the DUT instantiated, resets sequenced, and outputs monitored.
 
 ```bash
-./generate_verilog.tcl -config ../test_files/configs/test2.json
+cd verilog_scaffold
+vscaff -config test_files/configs/test2.json
 ```
 
 ```
@@ -256,7 +319,9 @@ This is `test_files/configs/test2.json`, which uses every major feature:
 | Key | Required | Type | Default | Description |
 |---|---|---|---|---|
 | `module` | **yes** | string | n/a | Name of the module to generate |
-| `path` | no | string | current directory | Output directory, or full output file path |
+| `design_path` | no | string | current directory | Where to write the design: a directory or a `.v`/`.sv` file path |
+| `path` | no | string | n/a | Alias for `design_path`, kept for older configs |
+| `tb_path` | no | string | same directory as the design | Where to write the testbench: a directory or a `.v`/`.sv` file path |
 | `parameters` | no | object | none | Module parameters and their default values |
 | `clocks` | no | object | auto-detect | Clock names and their periods in ns |
 | `clk_period` | no | number | n/a | Legacy shorthand: one clock named `clk` with this period |
@@ -272,34 +337,56 @@ Each key is explained in detail below.
 
 The name of the generated module. It must be a legal Verilog identifier and not a reserved keyword.
 
-If the value contains a directory or an extension, they are stripped: `"rtl/alu.v"` becomes module `alu`. Use [`path`](#path) to control where files are written.
+If the value contains a directory or an extension, they are stripped: `"rtl/alu.v"` becomes module `alu`. Use [`design_path` and `tb_path`](#design_path-and-tb_path) to control where files are written.
 
-### `path`
+### `design_path` and `tb_path`
 
-Where to write the output. It can be either of the following:
+These two keys control where the design and the testbench are written. Each can be either of the following:
 
-- **A directory**, such as `"../verilog"`. The design is written as `<directory>/<module>.v`.
-- **A file path ending in `.v` or `.sv`**, such as `"rtl/fifo_top.sv"`. The design is written to exactly that file.
+- **A directory**, such as `"../rtl"`. A default file name is used inside it.
+- **A file path ending in `.v` or `.sv`**, such as `"../sim/fifo_tb.v"`. The file is written to exactly that path.
 
-The testbench is always written **in the same directory as the design**, as `tb_<module>` with the **same extension** as the design file.
+| Key | If it's a directory | If it's a file path | If omitted |
+|---|---|---|---|
+| `design_path` | `<directory>/<module>.v` | Exactly that file | `<module>.v` in your current directory |
+| `tb_path` | `<directory>/tb_<module>` + the design's extension | Exactly that file | In the same directory as the design |
 
-How paths are resolved:
+`path` is still accepted as an alias for `design_path`, so older configs keep working. Setting both `path` and `design_path` is an error.
 
-| `path` value | Resolved against |
+Keeping design and testbench files apart, a common layout, looks like this:
+
+```json
+{
+  "module": "uart_tx",
+  "design_path": "../rtl",
+  "tb_path": "../sim"
+}
+```
+
+If this config is saved in `test_files/configs/`, it writes `test_files/rtl/uart_tx.v` and `test_files/sim/tb_uart_tx.v`.
+
+**Testbench module name.** By default the testbench module is named `tb_<module>`. If `tb_path` names a file, the file name becomes the module name instead, so the module always matches its file. For example, `"tb_path": "../sim/uart_tx_tb.v"` creates `module uart_tx_tb;`. That name must be a legal Verilog identifier and must differ from the design module's name.
+
+**Extensions.** When `tb_path` is a directory (or omitted), the testbench uses the same extension as the design, so a `.sv` design gets a `.sv` testbench.
+
+If the testbench is disabled with `"generate_tb": false`, `tb_path` is ignored and a note is printed.
+
+**How paths are resolved.** This applies to both keys:
+
+| Value | Resolved against |
 |---|---|
-| *(omitted)* | Your current working directory |
-| Relative, e.g. `"../verilog"` | The **directory containing the config file**, **not** your current directory |
+| Relative, e.g. `"../rtl"` | The **directory containing the config file**, **not** your current directory |
 | Absolute, e.g. `"/home/you/rtl"` | Used as-is |
 
 This means a config always writes to the same place, no matter which directory you run the tool from. For example, `test_files/configs/test2.json` uses `"path": "../verilog"`, which always means `test_files/verilog/`. All of these commands produce the same output:
 
 ```bash
-cd src && ./generate_verilog.tcl -config ../test_files/configs/test2.json
-./src/generate_verilog.tcl -config test_files/configs/test2.json          # from the project root
-cd test_files/configs && ../../src/generate_verilog.tcl -config test2.json
+vscaff -config test_files/configs/test2.json                      # from the repository root
+vscaff -config ../test_files/configs/test2.json                   # from src/
+vscaff -config ~/verilog_scaffold/test_files/configs/test2.json   # from any other directory
 ```
 
-Missing directories are created automatically. The full resolved path is printed after generation.
+Missing directories are created automatically. The full resolved paths are printed after generation.
 
 ### `parameters`
 
@@ -423,7 +510,7 @@ The design body is intentionally left empty. The tool generates the interface; y
 
 ### The testbench file
 
-The testbench is named `tb_<module>` and contains, in order:
+The testbench is named `tb_<module>` (or after the file name given in `tb_path`) and contains, in order:
 
 | Section | Contents |
 |---|---|
@@ -446,7 +533,7 @@ Inside the `initial` block:
 
 ### Complete example output
 
-Running `./generate_verilog.tcl -config ../test_files/configs/test2.json` on the [full example](#full-example) produces the following two files.
+Running `vscaff -config test_files/configs/test2.json` on the [full example](#full-example) produces the following two files.
 
 <details>
 <summary><b>dual_clock_fifo.v</b></summary>
@@ -622,7 +709,7 @@ ERROR: '/home/you/verilog_scaffold/test_files/verilog/dual_clock_fifo.v' already
 This protects modules you've already started writing logic in. In config mode, **all** output paths are checked **before anything is written**. If the testbench already exists, the design isn't written either, so a run never leaves you with a mismatched half-update.
 
 ```bash
-./generate_verilog.tcl -force -config ../test_files/configs/test2.json
+vscaff -force -config test_files/configs/test2.json
 ```
 
 ### Input validation
@@ -639,6 +726,7 @@ Everything is checked before any file is written, so the tool fails early with a
 
 | Problem | Example error |
 |---|---|
+| Tcllib not installed | `the Tcl 'json' package (part of Tcllib) is not installed. ...` |
 | File missing or unreadable | `configuration file 'x.json' not found or not readable` |
 | Not a `.json` file | `unsupported config format '.yaml' (expected .json)` |
 | Malformed JSON | `invalid JSON in 'c.json': unexpected token "END" at position 8; expecting OBJECT` |
@@ -655,6 +743,10 @@ Everything is checked before any file is written, so the tool fails early with a
 | Empty parameter value | `parameter 'DEPTH' has an empty value` |
 | Non-boolean flag | `"generate_tb" must be true or false, got 'maybe'` |
 | Malformed port entry | `invalid input port entry: ...` |
+| Both `path` and `design_path` set | `use either "design_path" or "path", not both` |
+| Testbench file named like the design | `testbench module name 'uart_tx' is the same as the design module name` |
+| Invalid testbench file name | `invalid testbench module name 'my-tb': ...` |
+| Design and testbench on the same file | `design and testbench would both be written to '...'` |
 
 **File mode checks:** invalid or reserved module names, unsupported extensions, and `.json` file names (with a hint to use `-config`).
 
@@ -697,6 +789,7 @@ The `x` and `z` values on the outputs are expected at this stage, because the de
 
 ```
 verilog_scaffold/
+├── install.sh                   # Installs the vscaff command (see Installation)
 ├── src/
 │   ├── generate_verilog.tcl     # Entry point: argument parsing, library loading, error handling
 │   └── lib/
@@ -728,5 +821,4 @@ How the pieces fit together:
 - **The design body is empty.** The tool generates the module interface only; you write the logic.
 - **Testbench stimulus is a placeholder.** The testbench sets up clocks, resets, the DUT and monitoring, but the actual test sequence is left for you to write.
 - **Fixed timescale.** All files use `` `timescale 1ns / 1ps ``, and clock periods are always in ns.
-- **Fixed testbench naming in config mode.** The testbench is always named `tb_<module>` and written next to the design file.
 - **Name-based detection.** Auto-detected clocks and resets depend on naming conventions. Declare clocks explicitly under `clocks` if your names don't follow these patterns.

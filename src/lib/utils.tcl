@@ -105,3 +105,82 @@ proc write_output {path content} {
         close $fp
     }
 }
+
+# Turn "JSON with comments" into plain JSON for the json package:
+#   - // line comments and /* block */ comments are blanked out
+#   - trailing commas before ] or } are removed
+# Text inside strings is never touched, and every character outside a
+# comment keeps its position, so parser error offsets still match the file.
+proc clean_json {text} {
+    set out ""
+    set n [string length $text]
+    set i 0
+    set in_str 0
+    set comma -1                ;# position in $out of a possibly-trailing comma
+
+    while {$i < $n} {
+        set c [string index $text $i]
+
+        if {$in_str} {
+            append out $c
+            if {$c eq "\\" && $i + 1 < $n} {
+                append out [string index $text [incr i]]
+            } elseif {$c eq "\""} {
+                set in_str 0
+            }
+            incr i
+            continue
+        }
+
+        set two [string range $text $i [expr {$i + 1}]]
+        if {$two eq "//"} {
+            set end [string first "\n" $text $i]
+            if {$end < 0} { set end $n }
+            append out [string repeat " " [expr {$end - $i}]]
+            set i $end
+            continue
+        }
+        if {$two eq "/*"} {
+            set end [string first "*/" $text [expr {$i + 2}]]
+            if {$end < 0} {
+                set line [expr {[regexp -all "\n" [string range $text 0 $i]] + 1}]
+                error "unterminated /* comment starting on line $line"
+            }
+            incr end 2
+            append out [regsub -all {[^\n]} [string range $text $i [expr {$end - 1}]] " "]
+            set i $end
+            continue
+        }
+
+        if {$c eq "\""} {
+            set in_str 1
+            set comma -1
+        } elseif {$c eq ","} {
+            set comma [string length $out]
+        } elseif {$c eq "\]" || $c eq "\}"} {
+            if {$comma >= 0} {
+                set out [string replace $out $comma $comma " "]
+            }
+            set comma -1
+        } elseif {![string is space $c]} {
+            set comma -1
+        }
+        append out $c
+        incr i
+    }
+    return $out
+}
+
+# Error out if any "<placeholder>" string values (as written by -init) are
+# still in the config. Expects comments to be stripped already.
+proc check_placeholders {text} {
+    set found {}
+    foreach {range} [regexp -all -inline -indices {"<[^"<>\n]*>"} $text] {
+        lassign $range start end
+        set line [expr {[regexp -all "\n" [string range $text 0 $start]] + 1}]
+        lappend found "[string range $text [expr {$start + 1}] [expr {$end - 1}]] (line $line)"
+    }
+    if {[llength $found] > 0} {
+        error "the config still has placeholders to fill in:\n    [join $found "\n    "]"
+    }
+}
